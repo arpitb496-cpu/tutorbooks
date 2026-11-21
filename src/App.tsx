@@ -20,6 +20,9 @@ import ForecastScreen from './components/ForecastScreen';
 import AlertsPanel from './components/AlertsPanel';
 import { buildAlerts } from './lib/alerts';
 import { AddBillForm, AddCustomerForm, CreateInvoiceForm } from './components/Forms';
+import Modal from './components/Modal';
+import InvoiceCreatedModal from './components/InvoiceCreatedModal';
+import type { InvoiceCardData } from './components/InvoiceCreatedModal';
 
 const BUCKET_LABEL: Record<AgeingBucket, string> = {
   current: 'Not due yet',
@@ -136,6 +139,18 @@ const styles: Record<string, CSSProperties> = {
 
 function sortByDueDate<T extends { dueDate: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+/** Next date with day-of-month dueDay on or after today, clamped to the month length. */
+function nextDueDate(dueDay: number, today: string): string {
+  const [y = 1970, m = 1, d = 1] = today.split('-').map(Number);
+  // m is 1-based; use a 0-based month index. Move to next month if today is past dueDay.
+  const monthIndex = d > dueDay ? m : m - 1;
+  const targetYear = y + Math.floor(monthIndex / 12);
+  const targetMonth = monthIndex % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const day = Math.min(dueDay, lastDay);
+  return new Date(Date.UTC(targetYear, targetMonth, day)).toISOString().slice(0, 10);
 }
 
 // ---------- Sign-in / sign-up ----------
@@ -317,6 +332,10 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
   const [invoiceCustomerId, setInvoiceCustomerId] = useState<string | null>(null);
+  const [quickInvoice, setQuickInvoice] = useState<InvoiceCardData | null>(null);
+  const [editDetails, setEditDetails] = useState<{ customerId: string; amount: number; dueDate: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (toast === null) return undefined;
@@ -400,6 +419,7 @@ export default function App() {
     setToast(invs.length === 1 ? 'Invoice created' : `${invs.length} invoices created`);
     setLastAddedId(invs[0]?.id ?? null);
     setOpenForm(null);
+    setEditDetails(null);
   }
 
   function addBill(b: Bill) {
@@ -407,6 +427,34 @@ export default function App() {
     setToast('Bill added');
     setLastAddedId(b.id);
     setOpenForm(null);
+  }
+
+  function quickCreate(customer: Customer) {
+    const issueDate = todayISO();
+    const inv: Invoice = {
+      id: 'i' + Date.now().toString(36),
+      customerId: customer.id,
+      amount: customer.monthlyFee,
+      issueDate,
+      dueDate: nextDueDate(customer.dueDay, issueDate),
+      draft: false,
+      payments: [],
+    };
+    commit({ ...data, invoices: [...data.invoices, inv] });
+    setLastAddedId(inv.id);
+    setQuickInvoice({
+      id: inv.id,
+      customerName: customer.name,
+      parentName: customer.parentName || customer.name,
+      studentName: customer.name,
+      amount: inv.amount,
+      issueDate: inv.issueDate,
+      dueDate: inv.dueDate,
+      description: 'Monthly tuition fee',
+      invoiceNumber: 'INV-' + inv.id.slice(-6).toUpperCase(),
+      parentPhone: customer.parentPhone,
+      tutorName: 'TutorBooks',
+    });
   }
 
   const header = (
@@ -484,11 +532,9 @@ export default function App() {
           >
             Add a customer first
           </button>
-          {openForm === 'customer' && (
-            <div style={{ ...styles.card, marginTop: 12 }}>
-              <AddCustomerForm onAdd={addCustomer} />
-            </div>
-          )}
+          <Modal title="Add customer" open={openForm === 'customer'} onClose={() => setOpenForm(null)}>
+            <AddCustomerForm onAdd={addCustomer} />
+          </Modal>
         </div>
       </div>
     );
@@ -530,6 +576,7 @@ export default function App() {
           onClick={() => {
             toggleForm('invoice');
             setInvoiceCustomerId(null);
+            setEditDetails(null);
           }}
         >
           Create invoice
@@ -543,20 +590,48 @@ export default function App() {
         </button>
       </div>
 
-      {openForm !== null && (
-        <div style={{ ...styles.card, marginTop: 12 }}>
-          {openForm === 'customer' && <AddCustomerForm onAdd={addCustomer} />}
-          {openForm === 'invoice' && (
-            <CreateInvoiceForm
-              key={invoiceCustomerId ?? 'none'}
-              customers={data.customers}
-              today={today}
-              onAdd={addInvoices}
-              initialCustomerId={invoiceCustomerId ?? undefined}
-            />
-          )}
-          {openForm === 'bill' && <AddBillForm today={today} onAdd={addBill} />}
-        </div>
+      <Modal title="Add customer" open={openForm === 'customer'} onClose={() => setOpenForm(null)}>
+        <AddCustomerForm onAdd={addCustomer} />
+      </Modal>
+      <Modal
+        title="New invoice"
+        open={openForm === 'invoice'}
+        onClose={() => {
+          setOpenForm(null);
+          setEditDetails(null);
+        }}
+      >
+        <CreateInvoiceForm
+          key={
+            editDetails === null
+              ? (invoiceCustomerId ?? 'none')
+              : `edit-${editDetails.customerId}-${editDetails.amount}-${editDetails.dueDate}`
+          }
+          customers={data.customers}
+          today={today}
+          onAdd={addInvoices}
+          initialCustomerId={invoiceCustomerId ?? undefined}
+          initialAmount={editDetails?.amount}
+          initialDueDate={editDetails?.dueDate}
+        />
+      </Modal>
+      <Modal title="Add bill" open={openForm === 'bill'} onClose={() => setOpenForm(null)}>
+        <AddBillForm today={today} onAdd={addBill} />
+      </Modal>
+      {quickInvoice !== null && (
+        <InvoiceCreatedModal
+          invoice={quickInvoice}
+          onClose={() => setQuickInvoice(null)}
+          onEditDetails={() => {
+            const created = data.invoices.find((inv) => inv.id === quickInvoice.id);
+            setQuickInvoice(null);
+            if (created !== undefined) {
+              setEditDetails({ customerId: created.customerId, amount: created.amount, dueDate: created.dueDate });
+              setInvoiceCustomerId(created.customerId);
+            }
+            setOpenForm('invoice');
+          }}
+        />
       )}
 
       <div style={styles.totals}>
@@ -591,10 +666,7 @@ export default function App() {
                 <button
                   type="button"
                   style={styles.secondaryButton}
-                  onClick={() => {
-                    setInvoiceCustomerId(c.id);
-                    setOpenForm('invoice');
-                  }}
+                  onClick={() => quickCreate(c)}
                 >
                   Create invoice
                 </button>

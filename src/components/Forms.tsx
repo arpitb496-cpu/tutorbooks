@@ -141,6 +141,7 @@ export function AddCustomerForm({ onAdd, onSaved }: AddCustomerFormProps) {
       <label style={styles.label}>
         Student name
         <input
+          autoFocus
           style={styles.input}
           aria-invalid={errors.name !== undefined}
           value={name}
@@ -215,6 +216,8 @@ interface CreateInvoiceFormProps {
   onAdd: (invs: Invoice[]) => void;
   onSaved?: (summary: string) => void;
   initialCustomerId?: string;
+  initialAmount?: number;
+  initialDueDate?: string;
 }
 
 export function CreateInvoiceForm({
@@ -223,15 +226,22 @@ export function CreateInvoiceForm({
   onAdd,
   onSaved,
   initialCustomerId,
+  initialAmount,
+  initialDueDate,
 }: CreateInvoiceFormProps) {
   const preselected = customers.find((c) => c.id === initialCustomerId);
   const initialCustomer = preselected ?? customers[0];
   const [customerId, setCustomerId] = useState(initialCustomer?.id ?? '');
   const [amount, setAmount] = useState(
-    initialCustomer !== undefined ? String(initialCustomer.monthlyFee) : '',
+    initialAmount !== undefined
+      ? String(initialAmount)
+      : initialCustomer !== undefined
+        ? String(initialCustomer.monthlyFee)
+        : '',
   );
   const [dueDate, setDueDate] = useState(
-    preselected !== undefined ? nextDueDate(today, preselected.dueDay) : addDays(today, 7),
+    initialDueDate ??
+      (preselected !== undefined ? nextDueDate(today, preselected.dueDay) : addDays(today, 7)),
   );
   const [months, setMonths] = useState('1');
   const [errors, setErrors] = useState<FieldErrors<InvoiceField>>({});
@@ -290,6 +300,7 @@ export function CreateInvoiceForm({
       <label style={styles.label}>
         Customer
         <select
+          autoFocus
           style={styles.input}
           aria-invalid={errors.customer !== undefined}
           value={customerId}
@@ -413,6 +424,7 @@ export function AddBillForm({ today, onAdd, onSaved }: AddBillFormProps) {
       <label style={styles.label}>
         Name
         <input
+          autoFocus
           style={styles.input}
           aria-invalid={errors.name !== undefined}
           value={name}
