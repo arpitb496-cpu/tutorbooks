@@ -218,6 +218,7 @@ interface CreateInvoiceFormProps {
   initialCustomerId?: string;
   initialAmount?: number;
   initialDueDate?: string;
+  editing?: { id: string; customerId: string; amount: number; dueDate: string };
 }
 
 export function CreateInvoiceForm({
@@ -228,19 +229,23 @@ export function CreateInvoiceForm({
   initialCustomerId,
   initialAmount,
   initialDueDate,
+  editing,
 }: CreateInvoiceFormProps) {
-  const preselected = customers.find((c) => c.id === initialCustomerId);
+  const presetCustomerId = editing?.customerId ?? initialCustomerId;
+  const presetAmount = editing?.amount ?? initialAmount;
+  const presetDueDate = editing?.dueDate ?? initialDueDate;
+  const preselected = customers.find((c) => c.id === presetCustomerId);
   const initialCustomer = preselected ?? customers[0];
   const [customerId, setCustomerId] = useState(initialCustomer?.id ?? '');
   const [amount, setAmount] = useState(
-    initialAmount !== undefined
-      ? String(initialAmount)
+    presetAmount !== undefined
+      ? String(presetAmount)
       : initialCustomer !== undefined
         ? String(initialCustomer.monthlyFee)
         : '',
   );
   const [dueDate, setDueDate] = useState(
-    initialDueDate ??
+    presetDueDate ??
       (preselected !== undefined ? nextDueDate(today, preselected.dueDay) : addDays(today, 7)),
   );
   const [months, setMonths] = useState('1');
@@ -278,16 +283,28 @@ export function CreateInvoiceForm({
 
     setErrors({});
     const invoices: Invoice[] = [];
-    for (let i = 0; i < count; i++) {
+    if (editing !== undefined) {
       invoices.push({
-        id: newId('i', `-${i}`),
+        id: editing.id,
         customerId,
         amount: value,
         issueDate: today,
-        dueDate: addMonths(dueDate, i),
+        dueDate,
         draft: false,
         payments: [],
       });
+    } else {
+      for (let i = 0; i < count; i++) {
+        invoices.push({
+          id: newId('i', `-${i}`),
+          customerId,
+          amount: value,
+          issueDate: today,
+          dueDate: addMonths(dueDate, i),
+          draft: false,
+          payments: [],
+        });
+      }
     }
     onAdd(invoices);
     setMonths('1');
@@ -344,23 +361,27 @@ export function CreateInvoiceForm({
         />
       </label>
       <FieldMessage message={errors.dueDate} />
-      <label style={styles.label}>
-        Repeat monthly for N months
-        <input
-          style={styles.input}
-          type="number"
-          min={1}
-          aria-invalid={errors.months !== undefined}
-          value={months}
-          onChange={(e) => {
-            setMonths(e.target.value);
-            setErrors((prev) => without(prev, 'months'));
-          }}
-        />
-      </label>
-      <FieldMessage message={errors.months} />
+      {editing === undefined && (
+        <>
+          <label style={styles.label}>
+            Repeat monthly for N months
+            <input
+              style={styles.input}
+              type="number"
+              min={1}
+              aria-invalid={errors.months !== undefined}
+              value={months}
+              onChange={(e) => {
+                setMonths(e.target.value);
+                setErrors((prev) => without(prev, 'months'));
+              }}
+            />
+          </label>
+          <FieldMessage message={errors.months} />
+        </>
+      )}
       <button type="submit" style={styles.button}>
-        Create invoice
+        {editing === undefined ? 'Create invoice' : 'Save changes'}
       </button>
     </form>
   );

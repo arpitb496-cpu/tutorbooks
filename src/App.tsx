@@ -333,9 +333,7 @@ export default function App() {
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
   const [invoiceCustomerId, setInvoiceCustomerId] = useState<string | null>(null);
   const [quickInvoice, setQuickInvoice] = useState<InvoiceCardData | null>(null);
-  const [editDetails, setEditDetails] = useState<{ customerId: string; amount: number; dueDate: string } | null>(
-    null,
-  );
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
 
   useEffect(() => {
     if (toast === null) return undefined;
@@ -415,11 +413,28 @@ export default function App() {
   }
 
   function addInvoices(invs: Invoice[]) {
+    if (editingInvoiceId !== null) {
+      const updated = invs[0];
+      if (updated !== undefined) {
+        commit({
+          ...data,
+          invoices: data.invoices.map((inv) =>
+            inv.id === editingInvoiceId
+              ? { ...inv, customerId: updated.customerId, amount: updated.amount, dueDate: updated.dueDate }
+              : inv,
+          ),
+        });
+      }
+      setEditingInvoiceId(null);
+      setToast('Invoice updated');
+      setLastAddedId(editingInvoiceId);
+      setOpenForm(null);
+      return;
+    }
     commit({ ...data, invoices: [...data.invoices, ...invs] });
     setToast(invs.length === 1 ? 'Invoice created' : `${invs.length} invoices created`);
     setLastAddedId(invs[0]?.id ?? null);
     setOpenForm(null);
-    setEditDetails(null);
   }
 
   function addBill(b: Bill) {
@@ -541,6 +556,8 @@ export default function App() {
   }
 
   const today = todayISO();
+  const editingInvoice =
+    editingInvoiceId === null ? undefined : data.invoices.find((inv) => inv.id === editingInvoiceId);
   const allPayments: Payment[] = data.invoices.flatMap((inv) => inv.payments);
   const outstanding = totalOutstanding(data.invoices);
   const collected = collectedThisMonth(allPayments, today);
@@ -576,7 +593,7 @@ export default function App() {
           onClick={() => {
             toggleForm('invoice');
             setInvoiceCustomerId(null);
-            setEditDetails(null);
+            setEditingInvoiceId(null);
           }}
         >
           Create invoice
@@ -598,21 +615,16 @@ export default function App() {
         open={openForm === 'invoice'}
         onClose={() => {
           setOpenForm(null);
-          setEditDetails(null);
+          setEditingInvoiceId(null);
         }}
       >
         <CreateInvoiceForm
-          key={
-            editDetails === null
-              ? (invoiceCustomerId ?? 'none')
-              : `edit-${editDetails.customerId}-${editDetails.amount}-${editDetails.dueDate}`
-          }
+          key={editingInvoiceId ?? 'new'}
           customers={data.customers}
           today={today}
           onAdd={addInvoices}
           initialCustomerId={invoiceCustomerId ?? undefined}
-          initialAmount={editDetails?.amount}
-          initialDueDate={editDetails?.dueDate}
+          editing={editingInvoice}
         />
       </Modal>
       <Modal title="Add bill" open={openForm === 'bill'} onClose={() => setOpenForm(null)}>
@@ -625,8 +637,8 @@ export default function App() {
           onEditDetails={() => {
             const created = data.invoices.find((inv) => inv.id === quickInvoice.id);
             setQuickInvoice(null);
+            setEditingInvoiceId(quickInvoice.id);
             if (created !== undefined) {
-              setEditDetails({ customerId: created.customerId, amount: created.amount, dueDate: created.dueDate });
               setInvoiceCustomerId(created.customerId);
             }
             setOpenForm('invoice');
