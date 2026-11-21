@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import type { AppData, Bill, BillCategory, Customer, Invoice, Payment } from './lib/types';
 import { formatINR } from './lib/money';
@@ -314,6 +314,23 @@ export default function App() {
   const [user, setUser] = useState<string | null>(() => currentUser());
   const [data, setData] = useState<AppData>(() => (currentUser() !== null ? loadData() : emptyData()));
   const [openForm, setOpenForm] = useState<'customer' | 'invoice' | 'bill' | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [lastAddedId, setLastAddedId] = useState<string | null>(null);
+  const [invoiceCustomerId, setInvoiceCustomerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (toast === null) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (lastAddedId === null) return undefined;
+    const el = document.getElementById('item-' + lastAddedId);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = window.setTimeout(() => setLastAddedId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [lastAddedId]);
 
   if (user === null) {
     return (
@@ -362,6 +379,9 @@ export default function App() {
       ),
     };
     commit(next);
+    setToast('Payment recorded');
+    setLastAddedId(invoiceId);
+    setOpenForm(null);
   }
 
   function toggleForm(kind: 'customer' | 'invoice' | 'bill') {
@@ -370,16 +390,22 @@ export default function App() {
 
   function addCustomer(c: Customer) {
     commit({ ...data, customers: [...data.customers, c] });
+    setToast('Customer added');
+    setLastAddedId(c.id);
     setOpenForm(null);
   }
 
   function addInvoices(invs: Invoice[]) {
     commit({ ...data, invoices: [...data.invoices, ...invs] });
+    setToast(invs.length === 1 ? 'Invoice created' : `${invs.length} invoices created`);
+    setLastAddedId(invs[0]?.id ?? null);
     setOpenForm(null);
   }
 
   function addBill(b: Bill) {
     commit({ ...data, bills: [...data.bills, b] });
+    setToast('Bill added');
+    setLastAddedId(b.id);
     setOpenForm(null);
   }
 
@@ -398,10 +424,32 @@ export default function App() {
     </div>
   );
 
+  const toastView =
+    toast === null ? null : (
+      <div
+        role="status"
+        style={{
+          position: 'fixed',
+          bottom: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#1f2933',
+          color: '#fff',
+          padding: '10px 16px',
+          borderRadius: 8,
+          fontSize: 14,
+          zIndex: 1000,
+        }}
+      >
+        {toast}
+      </div>
+    );
+
   if (data.customers.length === 0) {
     return (
       <div style={styles.page}>
         {header}
+        {toastView}
         <div style={styles.card}>
           <h2 style={styles.heading}>Welcome. Let's get you set up.</h2>
           <ol style={{ paddingLeft: 20, lineHeight: 1.6, margin: '0 0 16px' }}>
@@ -429,6 +477,13 @@ export default function App() {
           >
             Add customer
           </button>
+          <button
+            type="button"
+            style={{ ...styles.secondaryButton, marginTop: 8, marginLeft: 8 }}
+            onClick={() => setOpenForm('customer')}
+          >
+            Add a customer first
+          </button>
           {openForm === 'customer' && (
             <div style={{ ...styles.card, marginTop: 12 }}>
               <AddCustomerForm onAdd={addCustomer} />
@@ -446,6 +501,10 @@ export default function App() {
   const rows = dashboardRows(data.customers, data.invoices, allPayments, today);
   const customerById = new Map<string, Customer>(data.customers.map((c) => [c.id, c]));
   const alerts = buildAlerts(data, today);
+  const customerOutstanding = (customerId: string): number =>
+    data.invoices
+      .filter((inv) => inv.customerId === customerId)
+      .reduce((sum, inv) => sum + invoiceOutstanding(inv), 0);
 
   const openInvoices = sortByDueDate(data.invoices.filter((inv) => invoiceOutstanding(inv) > 0));
   const overdueInvoices = openInvoices.filter(
@@ -455,6 +514,7 @@ export default function App() {
   return (
     <div style={styles.page}>
       {header}
+      {toastView}
 
       <div style={styles.row}>
         <button
@@ -467,7 +527,10 @@ export default function App() {
         <button
           type="button"
           style={openForm === 'invoice' ? styles.button : styles.secondaryButton}
-          onClick={() => toggleForm('invoice')}
+          onClick={() => {
+            toggleForm('invoice');
+            setInvoiceCustomerId(null);
+          }}
         >
           Create invoice
         </button>
@@ -484,7 +547,13 @@ export default function App() {
         <div style={{ ...styles.card, marginTop: 12 }}>
           {openForm === 'customer' && <AddCustomerForm onAdd={addCustomer} />}
           {openForm === 'invoice' && (
-            <CreateInvoiceForm customers={data.customers} today={today} onAdd={addInvoices} />
+            <CreateInvoiceForm
+              key={invoiceCustomerId ?? 'none'}
+              customers={data.customers}
+              today={today}
+              onAdd={addInvoices}
+              initialCustomerId={invoiceCustomerId ?? undefined}
+            />
           )}
           {openForm === 'bill' && <AddBillForm today={today} onAdd={addBill} />}
         </div>
@@ -499,6 +568,40 @@ export default function App() {
           <div style={styles.totalLabel}>Collected this month</div>
           <div style={styles.totalValue}>{formatINR(collected)}</div>
         </div>
+      </div>
+
+      <div style={styles.card}>
+        <h2 style={styles.heading}>Customers</h2>
+        {data.customers.map((c) => {
+          const due = customerOutstanding(c.id);
+          return (
+            <div
+              key={c.id}
+              id={`item-${c.id}`}
+              style={{ ...styles.item, background: lastAddedId === c.id ? '#fff7d6' : undefined }}
+            >
+              <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: 6 }}>
+                <strong>{c.name}</strong>
+                <span style={styles.muted}>
+                  {formatINR(c.monthlyFee)} a month · Due day {c.dueDay}
+                </span>
+              </div>
+              <div style={{ ...styles.row, justifyContent: 'space-between' }}>
+                <span style={styles.muted}>{due === 0 ? 'All paid' : `Outstanding ${formatINR(due)}`}</span>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => {
+                    setInvoiceCustomerId(c.id);
+                    setOpenForm('invoice');
+                  }}
+                >
+                  Create invoice
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <AlertsPanel alerts={alerts} />
@@ -580,7 +683,7 @@ export default function App() {
               </thead>
               <tbody>
                 {sortByDueDate(data.bills).map((b) => (
-                  <tr key={b.id}>
+                  <tr key={b.id} id={`item-${b.id}`} style={lastAddedId === b.id ? { background: '#fff7d6' } : undefined}>
                     <td style={styles.td}>{b.name}</td>
                     <td style={styles.td}>{b.dueDate}</td>
                     <td style={styles.td}>{formatINR(b.amount)}</td>
@@ -603,7 +706,11 @@ export default function App() {
             if (customer === undefined) return null;
             const open = invoiceOutstanding(inv);
             return (
-              <div key={`${inv.id}-${open}`} style={styles.item}>
+              <div
+                key={`${inv.id}-${open}`}
+                id={`item-${inv.id}`}
+                style={{ ...styles.item, background: lastAddedId === inv.id ? '#fff7d6' : undefined }}
+              >
                 <div style={{ marginBottom: 4 }}>
                   <strong>{customer.name}</strong>{' '}
                   <span style={styles.muted}>
